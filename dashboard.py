@@ -26,7 +26,7 @@ conn = st.connection("supabase", type=SupabaseConnection,
 
 st.title("🍞 Sabroasistencia: Panel de Control")
 
-# Navegación por pestañas para mejor visualización en celular
+# Navegación por pestañas
 tab1, tab2 = st.tabs(["📊 Monitor de Asistencia", "📅 Carga de Horarios"])
 
 with tab1:
@@ -34,7 +34,6 @@ with tab1:
         fecha_sel = st.date_input("Fecha de auditoría:", datetime.now())
 
     try:
-        # Consultamos la vista maestra
         query = conn.table("daily_attendance_summary").select("*").execute()
         df_raw = pd.DataFrame(query.data)
 
@@ -42,7 +41,6 @@ with tab1:
             df_raw['fecha_dia'] = pd.to_datetime(df_raw['fecha_dia']).dt.date
             df_hoy = df_raw[df_raw['fecha_dia'] == fecha_sel]
 
-            # --- MÉTRICAS ---
             c1, c2, c3, c4 = st.columns([1,1,1,1])
             with c1: st.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
             with c2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
@@ -57,8 +55,6 @@ with tab1:
             
             if not df_hoy.empty:
                 df_view = df_hoy.copy()
-                
-                # Formateo de horas 12h para el usuario
                 if 'entrada' in df_view.columns:
                     df_view['entrada'] = pd.to_datetime(df_view['entrada']).dt.strftime('%I:%M %p')
                 if 'salida' in df_view.columns:
@@ -66,23 +62,20 @@ with tab1:
                 if 'hora_esperada' in df_view.columns:
                     df_view['hora_esperada'] = pd.to_datetime(df_view['hora_esperada']).dt.strftime('%I:%M %p').fillna("No asignada")
 
-                # Columnas finales a mostrar
                 cols_finales = ['persona', 'entrada', 'hora_esperada', 'tardanza', 'salida', 'tiempo_total', 'tiempo_adicional']
-                # Filtramos solo las que existan en el DataFrame para evitar errores
                 cols_disponibles = [c for c in cols_finales if c in df_view.columns]
-                
                 st.dataframe(df_view[cols_disponibles], use_container_width=True, hide_index=True)
             else:
                 st.info(f"No hay registros para el {fecha_sel.strftime('%d/%m/%Y')}")
         else:
-            st.warning("No hay datos disponibles en la base de datos.")
+            st.warning("No hay datos disponibles.")
 
     except Exception as e:
         st.error(f"Error al cargar monitor: {e}")
 
 with tab2:
     st.header("Carga Semanal de Horarios")
-    st.write("Sube el Excel con `BIOMETRIC_ID` y las horas de entrada (LUNES, MARTES, etc.)")
+    st.write("Sube el Excel con `BIOMETRIC_ID` y los días (LUNES, MARTES, etc.)")
     
     archivo_horarios = st.file_uploader("Seleccionar Excel (.xlsx)", type=["xlsx"])
     
@@ -95,29 +88,24 @@ with tab2:
                 st.write("Vista previa de los datos encontrados:")
                 st.dataframe(df_upload.head(), use_container_width=True)
                 
-               if st.button("🚀 Confirmar y Actualizar en la Nube"):
-    		df_to_save = df_upload[columnas_requeridas].copy()
-    
-   		 # Pasamos los nombres de columnas a minúsculas para que coincidan con SQL
-    		df_to_save.columns = [col.lower() for col in df_to_save.columns]
-    
-    		dias = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
-    		for dia in dias:
-       		 lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x)
-       		 )
-    
-   		 data_to_upsert = df_to_save.to_dict(orient='records')
-   		 conn.table("employee_schedules").upsert(data_to_upsert).execute()
-   		 st.success("✅ ¡Horarios actualizados!")
+                if st.button("🚀 Confirmar y Actualizar en la Nube"):
+                    # 1. Copiar y normalizar nombres de columnas a minúsculas para SQL
+                    df_to_save = df_upload[columnas_requeridas].copy()
+                    df_to_save.columns = [col.lower() for col in df_to_save.columns]
                     
-                    # Subida a Supabase
+                    # 2. Convertir tiempos a texto para evitar error de JSON
+                    dias = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
+                    for dia in dias:
+                        df_to_save[dia] = df_to_save[dia].apply(
+                            lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x)
+                        )
+                    
+                    # 3. Upsert en Supabase
                     data_to_upsert = df_to_save.to_dict(orient='records')
                     conn.table("employee_schedules").upsert(data_to_upsert).execute()
                     
-                    st.success("✅ Horarios actualizados con éxito en la base de datos.")
+                    st.success("✅ ¡Horarios actualizados con éxito!")
             else:
-                st.error(f"El archivo debe contener estas columnas: {columnas_requeridas}")
+                st.error(f"Faltan columnas. El Excel debe tener: {columnas_requeridas}")
         except Exception as e:
             st.error(f"Error al procesar el archivo: {e}")
-
-    st.info("💡 Consejo: Las horas deben estar en formato 24h (ej: 05:00 o 14:00).")
