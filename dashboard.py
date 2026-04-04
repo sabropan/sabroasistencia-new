@@ -19,8 +19,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Conexión a Supabase
-conn = st.connection("supabase", type=SupabaseConnection)
+# Conexión a Supabase con credenciales integradas
+conn = st.connection("supabase", type=SupabaseConnection, 
+    url="https://scynlrjnuywjcwovnzxh.supabase.co", 
+    key="sb_publishable_ws3IEWLtGf3sVgit7c18Uw_n-eMzmA7")
 
 st.title("🍞 Sabroasistencia: Panel de Control")
 
@@ -44,62 +46,66 @@ with tab1:
             c1, c2, c3, c4 = st.columns(4)
             c1.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
-            c3.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{len(df_hoy[df_hoy["salida_real"].isna()])}</h2></div>', unsafe_allow_html=True)
-            c4.markdown(f'<div class="metric-card"><h4>Turnos Fin</h4><h2>{len(df_hoy[df_hoy["salida_real"].notna()])}</h2></div>', unsafe_allow_html=True)
+            
+            # Ajuste de nombres de columnas según tu DB actual
+            en_planta = len(df_hoy[df_hoy["salida"].isna()]) if "salida" in df_hoy.columns else 0
+            turnos_fin = len(df_hoy[df_hoy["salida"].notna()]) if "salida" in df_hoy.columns else 0
+            
+            c3.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{en_planta}</h2></div>', unsafe_allow_html=True)
+            c4.markdown(f'<div class="metric-card"><h4>Turnos Fin</h4><h2>{turnos_fin}</h2></div>', unsafe_allow_html=True)
 
             st.write("---")
             
             if not df_hoy.empty:
-                # Limpieza de visualización
                 df_view = df_hoy.copy()
                 
-                # Formato de horas para el usuario
-                for col in ['entrada_real', 'salida_real', 'hora_esperada']:
-                    df_view[col] = pd.to_datetime(df_view[col]).dt.strftime('%I:%M %p').fillna("--")
+                # Formateo de columnas existentes
+                cols_presentes = df_view.columns.tolist()
                 
-                # Columnas finales a mostrar
-                cols_mostrar = ['persona', 'entrada_real', 'hora_esperada', 'tardanza', 'salida_real', 'tiempo_total_real', 'tiempo_adicional']
-                df_final = df_view[cols_mostrar]
-                df_final.columns = ['Empleado', 'Entrada Real', 'H. Esperada', '¿Tarde?', 'Salida', 'Jornada', 'Extra (H)']
+                if 'entrada' in cols_presentes:
+                    df_view['entrada'] = pd.to_datetime(df_view['entrada']).dt.strftime('%I:%M %p')
+                if 'salida' in cols_presentes:
+                    df_view['salida'] = pd.to_datetime(df_view['salida']).dt.strftime('%I:%M %p').fillna("--")
+                if 'hora_esperada' in cols_presentes:
+                    df_view['hora_esperada'] = pd.to_datetime(df_view['hora_esperada']).dt.strftime('%I:%M %p').fillna("--")
+                else:
+                    df_view['hora_esperada'] = "No asignada"
 
-                st.dataframe(df_final, use_container_width=True, hide_index=True)
+                # Selección dinámica de columnas para evitar errores si aún no se crea la tabla de horarios
+                cols_finales = ['persona', 'entrada', 'hora_esperada', 'tardanza', 'salida', 'tiempo_total']
+                cols_disponibles = [c for c in cols_finales if c in df_view.columns]
+                
+                st.dataframe(df_view[cols_disponibles], use_container_width=True, hide_index=True)
             else:
                 st.info(f"No hay registros para el {fecha_sel.strftime('%d/%m/%Y')}")
         else:
             st.warning("No se encontraron datos en la base de datos.")
 
     except Exception as e:
-        st.error(f"Error de conexión o de vista: {e}")
+        st.error(f"Error de visualización: {e}")
 
 with tab2:
     st.header("Carga Semanal de Horarios")
-    st.write("Sube el archivo Excel con los IDs biométricos y las horas de entrada para actualizar el comparador.")
+    st.write("Sube el Excel con `BIOMETRIC_ID` y los días (LUNES, MARTES, etc.) para actualizar el comparador.")
     
     archivo_horarios = st.file_uploader("Seleccionar Excel (.xlsx)", type=["xlsx"])
     
     if archivo_horarios:
         try:
             df_upload = pd.read_excel(archivo_horarios)
-            
-            # Validamos columnas mínimas
             columnas_requeridas = ['BIOMETRIC_ID', 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO']
+            
             if all(col in df_upload.columns for col in columnas_requeridas):
-                st.write("Vista previa de los datos a cargar:")
+                st.write("Vista previa de carga:")
                 st.dataframe(df_upload[columnas_requeridas].head(), use_container_width=True)
                 
                 if st.button("🚀 Confirmar y Actualizar en la Nube"):
-                    # Preparamos los datos para Supabase (Upsert por biometric_id)
                     data_to_upsert = df_upload[columnas_requeridas].to_dict(orient='records')
-                    
-                    # Ejecutamos la carga
-                    res = conn.table("employee_schedules").upsert(data_to_upsert).execute()
-                    
-                    st.success("✅ ¡Horarios actualizados correctamente! El monitor ya reflejará las nuevas tardanzas.")
+                    conn.table("employee_schedules").upsert(data_to_upsert).execute()
+                    st.success("✅ Horarios actualizados.")
             else:
-                st.error(f"El archivo no tiene el formato correcto. Debe incluir las columnas: {', '.join(columnas_requeridas)}")
-        
+                st.error(f"Faltan columnas requeridas: {columnas_requeridas}")
         except Exception as e:
-            st.error(f"Error al procesar el archivo: {e}")
+            st.error(f"Error al procesar: {e}")
 
-    st.write("---")
-    st.info("💡 **Instrucciones:** El Excel debe tener el ID del biométrico y la hora de entrada en formato 24h (ej: 05:00 o 14:30). El sistema calculará las extras automáticamente basándose en una jornada de 8 horas.")
+    st.info("💡 Asegúrate de que las horas en el Excel estén en formato 24h (ej: 05:00 o 14:00).")
