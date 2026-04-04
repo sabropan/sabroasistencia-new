@@ -47,6 +47,9 @@ with tab1:
             df_raw['fecha_dia'] = pd.to_datetime(df_raw['fecha_dia']).dt.date
             df_hoy = df_raw[df_raw['fecha_dia'] == fecha_sel].copy()
 
+            # Identificar el nombre de la columna del ID (bio_id o biometric_id)
+            col_id = 'biometric_id' if 'biometric_id' in df_hoy.columns else ('bio_id' if 'bio_id' in df_hoy.columns else None)
+
             # Métricas
             c1, c2, c3, c4 = st.columns([1,1,1,1])
             with c1: st.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
@@ -55,23 +58,27 @@ with tab1:
             with c3: st.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{en_p}</h2></div>', unsafe_allow_html=True)
             with c4: st.markdown(f'<div class="metric-card"><h4>Finalizados</h4><h2>{len(df_hoy) - en_p}</h2></div>', unsafe_allow_html=True)
 
-            if not df_hoy.empty:
-                # Toque final: URL del Bucket público
+            if not df_hoy.empty and col_id:
+                # URL del Bucket público
                 url_base = "https://scynlrjnuywjcwovnzxh.supabase.co/storage/v1/object/public/empleados/"
-                df_hoy['foto_url'] = df_hoy['bio_id'].apply(lambda x: f"{url_base}{str(x)}.jpg")
+                df_hoy['foto_url'] = df_hoy[col_id].apply(lambda x: f"{url_base}{str(x)}.jpg")
 
                 for col in ['entrada', 'salida', 'hora_esperada']:
                     if col in df_hoy.columns:
                         df_hoy[col] = pd.to_datetime(df_hoy[col]).dt.strftime('%I:%M %p').replace("NaT", "--")
 
+                # Columnas a mostrar
+                cols_finales = ['foto_url', 'persona', 'entrada', 'hora_esperada', 'tardanza', 'salida']
                 st.dataframe(
-                    df_hoy[['foto_url', 'persona', 'entrada', 'hora_esperada', 'tardanza', 'salida']],
+                    df_hoy[cols_finales],
                     column_config={
                         "foto_url": st.column_config.ImageColumn("Foto", width="small"),
                         "persona": "Empleado", "entrada": "Entrada", "hora_esperada": "Horario", "tardanza": "¿Tarde?", "salida": "Salida"
                     },
                     use_container_width=True, hide_index=True
                 )
+            elif not col_id:
+                st.error("No se encontró la columna de ID en la base de datos (biometric_id o bio_id).")
             else:
                 st.info("No hay marcas para esta fecha.")
     except Exception as e:
@@ -113,6 +120,7 @@ with tab3:
             if foto_data:
                 with st.spinner("Subiendo..."):
                     storage = conn.client.storage.from_("empleados")
+                    # Subimos con el nombre id.jpg (ej: 4.jpg)
                     storage.upload(path=f"{id_final}.jpg", file=foto_data.getvalue(), file_options={"content-type": "image/jpeg", "x-upsert": "true"})
                     st.success("✅ Foto guardada.")
         else:
