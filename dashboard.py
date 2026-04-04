@@ -34,12 +34,13 @@ st.title("🍞 Sabropan: Panel de Asistencia")
 # 3. PESTAÑAS
 tab1, tab2, tab3 = st.tabs(["📊 Monitor", "📅 Horarios", "📸 Fotos"])
 
-# --- TAB 1: MONITOR CON FOTOS ---
+# --- TAB 1: MONITOR (CÓDIGO FINAL CORREGIDO) ---
 with tab1:
     with st.sidebar:
         fecha_sel = st.date_input("Día a consultar:", datetime.now())
 
     try:
+        # Consultamos la vista que ya tiene el biometric_id
         query = conn.table("daily_attendance_summary").select("*").execute()
         df_raw = pd.DataFrame(query.data)
 
@@ -47,92 +48,87 @@ with tab1:
             df_raw['fecha_dia'] = pd.to_datetime(df_raw['fecha_dia']).dt.date
             df_hoy = df_raw[df_raw['fecha_dia'] == fecha_sel].copy()
 
-            # --- LÓGICA DE DETECCIÓN DE COLUMNA ID (TODOTERRENO) ---
-            # Buscamos nombres comunes para el ID del biométrico
-            posibles_nombres = ['biometric_id', 'bio_id', 'id_biometrico', 'biometrico', 'id']
-            col_id = next((c for c in df_hoy.columns if c.lower() in posibles_nombres), None)
-
-            # Métricas
-            c1, c2, c3, c4 = st.columns([1,1,1,1])
-            with c1: st.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
-            with c2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
-            en_p = len(df_hoy[df_hoy["salida"].isna()]) if "salida" in df_hoy.columns else 0
-            with c3: st.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{en_p}</h2></div>', unsafe_allow_html=True)
-            with c4: st.markdown(f'<div class="metric-card"><h4>Finalizados</h4><h2>{len(df_hoy) - en_p}</h2></div>', unsafe_allow_html=True)
-
             if not df_hoy.empty:
-                # Si encontramos el ID, creamos la URL de la foto
-                if col_id:
-                    url_base = "https://scynlrjnuywjcwovnzxh.supabase.co/storage/v1/object/public/empleados/"
-                    df_hoy['foto_url'] = df_hoy[col_id].apply(lambda x: f"{url_base}{str(x)}.jpg")
-                else:
-                    # Si no hay ID, ponemos una imagen vacía o un placeholder
-                    df_hoy['foto_url'] = None
+                # A. Construcción de URL de Fotos (Formato 00000001.jpg)
+                url_base = "https://scynlrjnuywjcwovnzxh.supabase.co/storage/v1/object/public/empleados/"
+                
+                # .zfill(8) asegura que el ID coincida con el nombre del archivo en el storage
+                df_hoy['foto_v'] = df_hoy['biometric_id'].apply(
+                    lambda x: f"{url_base}{str(x).zfill(8)}.jpg" if pd.notnull(x) else None
+                )
 
-                # Formatear horas
-                for col in ['entrada', 'salida', 'hora_esperada']:
+                # B. Métricas
+                c1, c2, c3, c4 = st.columns([1,1,1,1])
+                with c1: st.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
+                with c2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
+                en_p = len(df_hoy[df_hoy["salida"].isna()]) if "salida" in df_hoy.columns else 0
+                with c3: st.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{en_p}</h2></div>', unsafe_allow_html=True)
+                with c4: st.markdown(f'<div class="metric-card"><h4>Finalizados</h4><h2>{len(df_hoy) - en_p}</h2></div>', unsafe_allow_html=True)
+
+                # C. Formateo de Horas para vista limpia
+                for col in ['entrada', 'salida']:
                     if col in df_hoy.columns:
                         df_hoy[col] = pd.to_datetime(df_hoy[col]).dt.strftime('%I:%M %p').replace("NaT", "--")
 
-                # Mostrar tabla
-                columnas_finales = ['foto_url', 'persona', 'entrada', 'hora_esperada', 'tardanza', 'salida']
-                # Solo mostrar las columnas que existan en el dataframe
-                cols_to_show = [c for c in columnas_finales if c in df_hoy.columns]
-                
+                # D. Tabla Principal con Fotos
                 st.dataframe(
-                    df_hoy[cols_to_show],
+                    df_hoy[['foto_v', 'persona', 'entrada', 'tardanza', 'salida']],
                     column_config={
-                        "foto_url": st.column_config.ImageColumn("Foto", width="small"),
-                        "persona": "Empleado", "entrada": "Entrada", "hora_esperada": "Horario", "tardanza": "¿Tarde?", "salida": "Salida"
+                        "foto_v": st.column_config.ImageColumn("Foto", width="small"),
+                        "persona": "Empleado",
+                        "entrada": "Entrada",
+                        "tardanza": "¿Tarde?",
+                        "salida": "Salida"
                     },
-                    use_container_width=True, hide_index=True
+                    use_container_width=True,
+                    hide_index=True
                 )
             else:
-                st.info("No hay marcas para esta fecha.")
+                st.info(f"No hay registros para el día {fecha_sel.strftime('%d/%m/%Y')}")
     except Exception as e:
         st.error(f"Error en monitor: {e}")
 
 # --- TAB 2: CARGA DE HORARIOS ---
 with tab2:
-    st.header("Actualizar Horarios")
-    archivo_h = st.file_uploader("Subir Excel (.xlsx)", type=["xlsx"])
+    st.header("Actualizar Horarios (Excel)")
+    archivo_h = st.file_uploader("Subir archivo .xlsx", type=["xlsx"])
     if archivo_h:
         try:
             df_up = pd.read_excel(archivo_h)
-            columnas_req = ['BIOMETRIC_ID', 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO']
-            if all(col in df_up.columns for col in columnas_req):
+            if 'BIOMETRIC_ID' in df_up.columns:
                 if st.button("🚀 Guardar Horarios"):
-                    df_save = df_up[columnas_req].copy()
+                    df_save = df_up.copy()
                     df_save.columns = [c.lower() for c in df_save.columns]
-                    for d in ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']:
-                        df_save[d] = df_save[d].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
                     conn.table("employee_schedules").upsert(df_save.to_dict(orient='records')).execute()
-                    st.success("✅ Horarios actualizados.")
-            else:
-                st.error("Columnas incorrectas en el Excel.")
+                    st.success("✅ Horarios actualizados en Supabase.")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error al procesar Excel: {e}")
 
 # --- TAB 3: REGISTRO DE FOTOS ---
 with tab3:
-    st.header("📸 Capturar Foto")
+    st.header("📸 Captura de Foto Institucional")
     try:
-        query_e = conn.table("employees").select("biometric_id, full_name").execute()
-        df_e = pd.DataFrame(query_e.data)
+        res_e = conn.table("employees").select("biometric_id, full_name").execute()
+        df_e = pd.DataFrame(res_e.data)
+        
         if not df_e.empty:
-            # Asegurarse de usar el nombre correcto de la columna aquí también
-            id_col_master = 'biometric_id' if 'biometric_id' in df_e.columns else 'bio_id'
-            dict_e = {f"{r[id_col_master]} - {r['full_name']}": r[id_col_master] for _, r in df_e.iterrows()}
-            emp_sel = st.selectbox("Empleado:", options=list(dict_e.keys()))
-            id_final = dict_e[emp_sel]
+            lista_e = {f"{r['biometric_id']} - {r['full_name']}": r['biometric_id'] for _, r in df_e.iterrows()}
+            seleccion = st.selectbox("Seleccione Empleado:", options=list(lista_e.keys()))
+            id_final = lista_e[seleccion]
             
-            foto_data = st.camera_input(f"Foto para ID {id_final}")
-            if foto_data:
-                with st.spinner("Subiendo..."):
+            foto_input = st.camera_input(f"Tomar foto para ID: {id_final}")
+            
+            if foto_input:
+                with st.spinner("Subiendo al servidor..."):
+                    # Forzamos el nombre con 8 ceros para que coincida con el monitor
+                    nombre_archivo = f"{str(id_final).zfill(8)}.jpg"
                     storage = conn.client.storage.from_("empleados")
-                    storage.upload(path=f"{id_final}.jpg", file=foto_data.getvalue(), file_options={"content-type": "image/jpeg", "x-upsert": "true"})
-                    st.success("✅ Foto guardada correctamente.")
-        else:
-            st.warning("No hay empleados en la base de datos.")
+                    storage.upload(
+                        path=nombre_archivo,
+                        file=foto_input.getvalue(),
+                        file_options={"content-type": "image/jpeg", "x-upsert": "true"}
+                    )
+                    st.success(f"✅ Foto de {seleccion} guardada correctamente.")
+                    st.balloons()
     except Exception as e:
         st.error(f"Error en cámara: {e}")
