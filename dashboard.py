@@ -95,16 +95,20 @@ with tab2:
                 st.write("Vista previa de los datos encontrados:")
                 st.dataframe(df_upload.head(), use_container_width=True)
                 
-                if st.button("🚀 Confirmar y Actualizar en la Nube"):
-                    # Crear copia y convertir horas a texto para evitar error de JSON
-                    df_to_save = df_upload[columnas_requeridas].copy()
-                    
-                    dias = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO']
-                    for dia in dias:
-                        # Convertimos los objetos de tiempo a string HH:MM:SS
-                        df_to_save[dia] = df_to_save[dia].apply(
-                            lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x)
-                        )
+               if st.button("🚀 Confirmar y Actualizar en la Nube"):
+    		df_to_save = df_upload[columnas_requeridas].copy()
+    
+   		 # Pasamos los nombres de columnas a minúsculas para que coincidan con SQL
+    		df_to_save.columns = [col.lower() for col in df_to_save.columns]
+    
+    		dias = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
+    		for dia in dias:
+       		 lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x)
+       		 )
+    
+   		 data_to_upsert = df_to_save.to_dict(orient='records')
+   		 conn.table("employee_schedules").upsert(data_to_upsert).execute()
+   		 st.success("✅ ¡Horarios actualizados!")
                     
                     # Subida a Supabase
                     data_to_upsert = df_to_save.to_dict(orient='records')
