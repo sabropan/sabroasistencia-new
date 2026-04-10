@@ -34,10 +34,10 @@ st.title("🍞 Sabropan: Panel de Asistencia")
 # 3. PESTAÑAS
 tab1, tab2, tab3 = st.tabs(["📊 Monitor", "📅 Horarios", "📸 Fotos"])
 
-# --- TAB 1: MONITOR (CON CORRECCIÓN DE ZONA HORARIA) ---
+# --- TAB 1: MONITOR (CORRECCIÓN FINAL DE HORA COLOMBIA) ---
 with tab1:
     with st.sidebar:
-        # Fecha actual en Colombia para el selector por defecto
+        # Fecha actual en Colombia para el selector
         fecha_hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
         fecha_sel = st.date_input("Día a consultar:", fecha_hoy_col)
 
@@ -47,18 +47,17 @@ with tab1:
         df_raw = pd.DataFrame(query.data)
 
         if not df_raw.empty:
-            # Aseguramos que la fecha_dia sea comparable
             df_raw['fecha_dia'] = pd.to_datetime(df_raw['fecha_dia']).dt.date
             df_hoy = df_raw[df_raw['fecha_dia'] == fecha_sel].copy()
 
             if not df_hoy.empty:
-                # A. URL de Fotos con 8 ceros
+                # A. URL de Fotos (Formato 8 dígitos)
                 url_base = "https://scynlrjnuywjcwovnzxh.supabase.co/storage/v1/object/public/empleados/"
                 df_hoy['foto_v'] = df_hoy['biometric_id'].apply(
                     lambda x: f"{url_base}{str(x).zfill(8)}.jpg" if pd.notnull(x) else None
                 )
 
-                # B. Métricas superiores
+                # B. Métricas
                 c1, c2, c3, c4 = st.columns([1,1,1,1])
                 with c1: st.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
@@ -67,11 +66,11 @@ with tab1:
                 with c3: st.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{en_p}</h2></div>', unsafe_allow_html=True)
                 with c4: st.markdown(f'<div class="metric-card"><h4>Finalizados</h4><h2>{len(df_hoy) - en_p}</h2></div>', unsafe_allow_html=True)
 
-                # C. Formateo de Horas (Asegurando visualización Colombia -5)
+                # C. Formateo de Horas (Eliminando rastro de zona horaria para evitar desfases)
                 for col in ['entrada', 'salida']:
                     if col in df_hoy.columns:
-                        # Convertimos a datetime, forzamos LocalTime y formateamos a 12h
-                        df_hoy[col] = pd.to_datetime(df_hoy[col]).dt.strftime('%I:%M %p').replace("NaT", "--")
+                        # tz_localize(None) es el secreto para que no se mueva la hora de Bogotá
+                        df_hoy[col] = pd.to_datetime(df_hoy[col]).dt.tz_localize(None).dt.strftime('%I:%M %p').replace("NaT", "--")
 
                 # D. Tabla Principal
                 st.dataframe(
@@ -123,7 +122,6 @@ with tab3:
             
             if foto_input:
                 with st.spinner("Subiendo al servidor..."):
-                    # Nombre con 8 ceros: 00000001.jpg
                     nombre_archivo = f"{str(id_final).zfill(8)}.jpg"
                     storage = conn.client.storage.from_("empleados")
                     storage.upload(
