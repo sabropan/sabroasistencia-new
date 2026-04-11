@@ -9,8 +9,8 @@ st.set_page_config(page_title="Sabroasistencia", layout="wide", page_icon="🍞"
 st.markdown("""
     <style>
     /* Pegar contenido al borde superior */
-    .block-container { padding-top: 0rem !important; padding-left: 1rem !important; padding-right: 1rem !important; }
-    header { visibility: hidden; } /* Oculta el menú superior de Streamlit */
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 0rem !important; }
+    header { visibility: hidden; } 
     
     .stApp { background-color: #FDF8F3; }
     
@@ -28,14 +28,17 @@ st.markdown("""
         color: white !important;
     }
 
-    /* Cards de métricas más compactas y visibles */
+    /* Cards de métricas más compactas */
     .metric-card { 
         background-color: white; padding: 10px; border-radius: 12px; 
         border-left: 8px solid #D9832E; box-shadow: 2px 2px 10px rgba(0,0,0,0.05);
-        text-align: center; margin-top: -10px;
+        text-align: center;
     }
-    .metric-card h4 { margin: 0; color: #666; font-size: 1.1rem; }
-    .metric-card h2 { margin: 0; color: #D9832E; font-size: 2.2rem; font-weight: bold; }
+    .metric-card h4 { margin: 0; color: #666; font-size: 1rem; }
+    .metric-card h2 { margin: 0; color: #D9832E; font-size: 2rem; font-weight: bold; }
+    
+    /* Ajuste para que el input de fecha no use tanto espacio */
+    div[data-testid="stDateInput"] label { display: none; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -44,25 +47,29 @@ conn = st.connection("supabase", type=SupabaseConnection,
     url="https://scynlrjnuywjcwovnzxh.supabase.co", 
     key="sb_publishable_ws3IEWLtGf3sVgit7c18Uw_n-eMzmA7")
 
-# 3. CUERPO DEL DASHBOARD
-# Usamos columnas para el título y métricas en una sola fila muy alta
-col_t, col_m1, col_m2, col_m3 = st.columns([1.5, 1, 1, 1])
+# 3. ENCABEZADO SUPERIOR (Título + Calendario + Métricas)
+# Creamos 5 columnas para que todo quepa en una sola línea al borde superior
+col_t, col_cal, col_m1, col_m2, col_m3 = st.columns([1.2, 1, 1, 1, 1])
 
 with col_t:
-    st.title("🍞 MONITOR")
+    st.subheader("🍞 MONITOR")
+
+with col_cal:
+    # Selector de fecha (Calendario)
+    hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
+    fecha_consulta = st.date_input("Seleccionar Fecha", hoy_col)
 
 try:
-    # Traemos los datos de la vista que ya tiene la hora corregida como texto
+    # Traemos los datos de la vista
     query = conn.table("daily_attendance_summary").select("*").execute()
     df_raw = pd.DataFrame(query.data)
 
     if not df_raw.empty:
-        # Fecha de hoy en Colombia para el filtro
-        hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
         df_raw['fecha_dia'] = pd.to_datetime(df_raw['fecha_dia']).dt.date
-        df_hoy = df_raw[df_raw['fecha_dia'] == hoy_col].copy()
+        # Filtramos por la fecha seleccionada en el calendario
+        df_hoy = df_raw[df_raw['fecha_dia'] == fecha_consulta].copy()
 
-        # Render de Métricas en el encabezado
+        # Render de Métricas dinámicas según el día seleccionado
         with col_m1: st.markdown(f'<div class="metric-card"><h4>Personal</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
         with col_m2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
         en_p = len(df_hoy[df_hoy["salida"] == "--"])
@@ -75,7 +82,7 @@ try:
                 lambda x: f"{url_base}{str(x).zfill(8)}.jpg" if pd.notnull(x) else None
             )
 
-            # TABLA PRINCIPAL - Selección exacta de columnas para evitar la columna vacía
+            # TABLA PRINCIPAL - Solo columnas necesarias
             st.dataframe(
                 df_hoy[['foto_v', 'persona', 'entrada', 'salida', 'tiempo_total', 'tardanza']],
                 column_config={
@@ -90,12 +97,12 @@ try:
                 hide_index=True
             )
         else:
-            st.info("No hay registros hoy.")
+            st.warning(f"No hay registros para el día {fecha_consulta.strftime('%d/%m/%Y')}")
 
 except Exception as e:
     st.error(f"Error: {e}")
 
-# --- SECCIÓN INFERIOR PARA GESTIÓN (Pestañas discretas) ---
+# --- SECCIÓN INFERIOR (Gestión) ---
 st.write("---")
 tab_h, tab_f = st.tabs(["📅 Cargar Horarios", "📸 Capturar Fotos"])
 
