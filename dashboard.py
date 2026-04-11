@@ -34,15 +34,15 @@ st.title("🍞 Sabropan: Panel de Asistencia")
 # 3. PESTAÑAS
 tab1, tab2, tab3 = st.tabs(["📊 Monitor", "📅 Horarios", "📸 Fotos"])
 
-# --- TAB 1: MONITOR (CORRECCIÓN FINAL DE HORA COLOMBIA) ---
+# --- TAB 1: MONITOR (SOLUCIÓN DEFINITIVA HORA Y TIEMPO) ---
 with tab1:
     with st.sidebar:
-        # Fecha actual en Colombia para el selector
+        # Forzamos la fecha actual en Colombia (UTC-5)
         fecha_hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
         fecha_sel = st.date_input("Día a consultar:", fecha_hoy_col)
 
     try:
-        # Consultamos la vista
+        # Consultamos la vista que ya tiene el biometric_id y tiempo_total
         query = conn.table("daily_attendance_summary").select("*").execute()
         df_raw = pd.DataFrame(query.data)
 
@@ -51,7 +51,7 @@ with tab1:
             df_hoy = df_raw[df_raw['fecha_dia'] == fecha_sel].copy()
 
             if not df_hoy.empty:
-                # A. URL de Fotos (Formato 8 dígitos)
+                # A. URL de Fotos (Formato 00000001.jpg)
                 url_base = "https://scynlrjnuywjcwovnzxh.supabase.co/storage/v1/object/public/empleados/"
                 df_hoy['foto_v'] = df_hoy['biometric_id'].apply(
                     lambda x: f"{url_base}{str(x).zfill(8)}.jpg" if pd.notnull(x) else None
@@ -62,25 +62,27 @@ with tab1:
                 with c1: st.markdown(f'<div class="metric-card"><h4>Registrados</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
                 
+                # Cálculo de personas actualmente en planta
                 en_p = len(df_hoy[df_hoy["salida"].isna()]) if "salida" in df_hoy.columns else 0
                 with c3: st.markdown(f'<div class="metric-card"><h4>En Planta</h4><h2>{en_p}</h2></div>', unsafe_allow_html=True)
                 with c4: st.markdown(f'<div class="metric-card"><h4>Finalizados</h4><h2>{len(df_hoy) - en_p}</h2></div>', unsafe_allow_html=True)
 
-                # C. Formateo de Horas (Eliminando rastro de zona horaria para evitar desfases)
+                # C. Formateo de Horas (BLINDADO contra desfase de zona horaria)
                 for col in ['entrada', 'salida']:
                     if col in df_hoy.columns:
-                        # tz_localize(None) es el secreto para que no se mueva la hora de Bogotá
+                        # tz_localize(None) asegura que se mantenga la hora que viene de SQL
                         df_hoy[col] = pd.to_datetime(df_hoy[col]).dt.tz_localize(None).dt.strftime('%I:%M %p').replace("NaT", "--")
 
-                # D. Tabla Principal
+                # D. Tabla Principal con Tiempo Trabajado
                 st.dataframe(
-                    df_hoy[['foto_v', 'persona', 'entrada', 'tardanza', 'salida']],
+                    df_hoy[['foto_v', 'persona', 'entrada', 'salida', 'tiempo_total', 'tardanza']],
                     column_config={
                         "foto_v": st.column_config.ImageColumn("Foto", width="small"),
                         "persona": "Empleado",
                         "entrada": "Entrada",
-                        "tardanza": "¿Tarde?",
-                        "salida": "Salida"
+                        "salida": "Salida",
+                        "tiempo_total": "⏱️ Tiempo Total",
+                        "tardanza": "¿Tarde?"
                     },
                     use_container_width=True,
                     hide_index=True
@@ -122,6 +124,7 @@ with tab3:
             
             if foto_input:
                 with st.spinner("Subiendo al servidor..."):
+                    # Nombre consistente con 8 dígitos: 00000001.jpg
                     nombre_archivo = f"{str(id_final).zfill(8)}.jpg"
                     storage = conn.client.storage.from_("empleados")
                     storage.upload(
