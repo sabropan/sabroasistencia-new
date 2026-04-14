@@ -37,7 +37,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 2. CONEXIÓN A SUPABASE
+# 2. CONEXIÓN A SUPABASE (Usa automáticamente los Secrets)
 conn = st.connection("supabase", type=SupabaseConnection)
 
 # --- ESTRUCTURA DE PESTAÑAS ---
@@ -51,11 +51,11 @@ with tab1:
         st.subheader("🍞 MONITOR")
 
     with col_cal:
+        # Hora local Colombia (UTC-5)
         hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
         fecha_consulta = st.date_input("Fecha Monitor", hoy_col)
 
     try:
-        # Consulta a la nueva vista de asistencia dinámica
         query = conn.table("daily_attendance_summary").select("*").execute()
         df_raw = pd.DataFrame(query.data)
 
@@ -90,15 +90,12 @@ with tab1:
     except Exception as e:
         st.error(f"Error en Monitor: {e}")
 
-# --- TAB 2: GESTIÓN ÁGIL DE HORARIOS ---
+# --- TAB 2: GESTIÓN DE HORARIOS ---
 with tab2:
     st.header("📅 Planificador Semanal")
-    
-    # 1. Selector de semana
     lunes_actual = hoy_col - timedelta(days=hoy_col.weekday())
     fecha_semana = st.date_input("Semana del lunes:", lunes_actual)
     
-    # 2. Cargar empleados y malla
     res_e = conn.table("employees").select("biometric_id, full_name").execute()
     df_emp = pd.DataFrame(res_e.data)
     
@@ -106,17 +103,15 @@ with tab2:
         dias_sem = [fecha_semana + timedelta(days=i) for i in range(7)]
         cols_nombres = [d.strftime('%A %d/%m') for d in dias_sem]
         
-        # Construir tabla de edición
         grid_data = []
         for _, e in df_emp.iterrows():
             fila = {"ID": e['biometric_id'], "Nombre": e['full_name']}
             for c in cols_nombres: fila[c] = "06:00 - 14:00"
             grid_data.append(fila)
         
-        st.info("💡 Edita las celdas (Formato HH:MM - HH:MM) y presiona Guardar.")
         df_editor = st.data_editor(pd.DataFrame(grid_data), hide_index=True, use_container_width=True)
         
-        if st.button("💾 Guardar Horarios de la Semana"):
+        if st.button("💾 Guardar Horarios"):
             registros = []
             for _, r in df_editor.iterrows():
                 for i, col_name in enumerate(cols_nombres):
@@ -134,7 +129,7 @@ with tab2:
             
             if registros:
                 conn.table("employee_schedules_daily").upsert(registros).execute()
-                st.success("¡Horarios actualizados en la base de datos!")
+                st.success("¡Horarios guardados!")
 
 # --- TAB 3: CAPTURAR FOTOS ---
 with tab3:
@@ -146,11 +141,11 @@ with tab3:
         if cam:
             b_id = sel.split(" - ")[0].zfill(8)
             conn.client.storage.from_("empleados").upload(path=f"{b_id}.jpg", file=cam.getvalue(), file_options={"content-type":"image/jpeg","upsert":"true"})
-            st.success(f"Foto de {b_id} guardada.")
+            st.success(f"Foto guardada para ID {b_id}")
 
-# --- TAB 4: AUDITORÍA Y REPORTES ---
+# --- TAB 4: AUDITORÍA ---
 with tab4:
-    st.header("📊 Reportes de Asistencia")
+    st.header("📊 Reportes")
     c1, c2 = st.columns(2)
     with c1: f_i = st.date_input("Desde", hoy_col - timedelta(days=15))
     with c2: f_f = st.date_input("Hasta", hoy_col)
@@ -158,11 +153,5 @@ with tab4:
     if st.button("🔍 Generar Reporte"):
         res_r = conn.table("daily_attendance_summary").select("*").gte("fecha_dia", f_i).lte("fecha_dia", f_f).execute()
         df_r = pd.DataFrame(res_r.data)
-        
         if not df_r.empty:
-            st.subheader("Resumen General")
-            resumen = df_r.groupby("persona").agg({"tardanza": lambda x: (x == "SÍ").sum()}).rename(columns={"tardanza": "Total Tardanzas"})
-            st.dataframe(resumen, use_container_width=True)
-            
-            st.subheader("Detalle por Día")
             st.dataframe(df_r[['fecha_dia', 'persona', 'entrada_real', 'salida_real', 'tardanza']], use_container_width=True)
