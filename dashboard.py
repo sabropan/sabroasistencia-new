@@ -12,7 +12,7 @@ st.markdown("""
     header { visibility: hidden; } 
     .stApp { background-color: #FDF8F3; }
     
-    /* Fuente maximizada para la tabla */
+    /* Fuente maximizada para los datos de la tabla */
     [data-testid="stDataFrame"] td, [data-testid="stTable"] td {
         font-size: 24px !important; 
         font-weight: 600 !important;
@@ -59,7 +59,6 @@ with tab1:
         st.subheader("🍞 CONTROL DE ASISTENCIA")
 
     with col_cal:
-        # Hora local Colombia (UTC-5)
         hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
         fecha_consulta = st.date_input("Seleccionar Fecha", hoy_col)
 
@@ -71,7 +70,6 @@ with tab1:
             df_raw['fecha_dia'] = pd.to_datetime(df_raw['fecha_dia']).dt.date
             df_hoy = df_raw[df_raw['fecha_dia'] == fecha_consulta].copy()
 
-            # Métricas
             with col_m1: st.markdown(f'<div class="metric-card"><h4>Personal</h4><h2>{len(df_hoy)}</h2></div>', unsafe_allow_html=True)
             with col_m2: st.markdown(f'<div class="metric-card"><h4>Tardanzas</h4><h2>{len(df_hoy[df_hoy["tardanza"] == "SÍ"])}</h2></div>', unsafe_allow_html=True)
             en_p = len(df_hoy[df_hoy["salida_real"] == "--"])
@@ -98,7 +96,7 @@ with tab1:
     except Exception as e:
         st.error(f"Error en Monitor: {e}")
 
-# --- TAB 2: GESTIÓN DE HORARIOS (CON PERSISTENCIA Y FORMATO SQL) ---
+# --- TAB 2: GESTIÓN DE HORARIOS (CON PERSISTENCIA Y RESOLUCIÓN DE CONFLICTOS) ---
 with tab2:
     st.header("📅 Planificador de Turnos Semanales")
     lunes_actual = hoy_col - timedelta(days=hoy_col.weekday())
@@ -144,7 +142,6 @@ with tab2:
                     if "-" in val:
                         try:
                             ent_p, sal_p = val.split("-")
-                            # Formato estricto HH:MM:SS para evitar APIError
                             batch.append({
                                 "biometric_id": str(r["ID"]),
                                 "fecha": dias_sem[i].isoformat(),
@@ -155,9 +152,14 @@ with tab2:
             
             if batch:
                 try:
-                    conn.table("employee_schedules_daily").upsert(batch).execute()
+                    # Aplicamos on_conflict para evitar errores de llaves duplicadas
+                    conn.table("employee_schedules_daily").upsert(
+                        batch, 
+                        on_conflict="biometric_id, fecha"
+                    ).execute()
+                    
                     st.session_state[session_key] = df_editor
-                    st.success("✅ ¡Horarios sincronizados con la base de datos!")
+                    st.success("✅ ¡Horarios sincronizados y actualizados!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
@@ -172,8 +174,15 @@ with tab3:
         cam = st.camera_input("Tomar Foto")
         if cam:
             b_id = sel.split(" - ")[0].zfill(8)
-            conn.client.storage.from_("empleados").upload(path=f"{b_id}.jpg", file=cam.getvalue(), file_options={"content-type":"image/jpeg","upsert":"true"})
-            st.success(f"Foto guardada para {sel}")
+            try:
+                conn.client.storage.from_("empleados").upload(
+                    path=f"{b_id}.jpg", 
+                    file=cam.getvalue(), 
+                    file_options={"content-type":"image/jpeg","upsert":"true"}
+                )
+                st.success(f"Foto guardada para {sel}")
+            except Exception as e:
+                st.error(f"Error al subir foto: {e}")
 
 # --- TAB 4: AUDITORÍA ---
 with tab4:
@@ -194,6 +203,6 @@ with tab4:
                 st.subheader("Detalle de Marcaciones")
                 st.dataframe(df_r[['fecha_dia', 'persona', 'entrada_real', 'salida_real', 'tardanza']], use_container_width=True, hide_index=True)
             else:
-                st.info("No se encontraron registros para este rango.")
+                st.info("No se encontraron registros en este periodo.")
         except Exception as e:
             st.error(f"Error al generar reporte: {e}")
