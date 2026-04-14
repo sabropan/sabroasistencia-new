@@ -37,8 +37,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 2. CONEXIÓN A SUPABASE (Usa automáticamente los Secrets)
-conn = st.connection("supabase", type=SupabaseConnection)
+# 2. CONEXIÓN REFORZADA A SUPABASE (Línea 41 corregida)
+try:
+    # Intento de conexión estándar
+    conn = st.connection("supabase", type=SupabaseConnection)
+except Exception:
+    # Si falla, forzamos la lectura desde st.secrets
+    conn = st.connection(
+        "supabase",
+        type=SupabaseConnection,
+        url=st.secrets["connections"]["supabase"]["url"],
+        key=st.secrets["connections"]["supabase"]["key"]
+    )
 
 # --- ESTRUCTURA DE PESTAÑAS ---
 tab1, tab2, tab3, tab4 = st.tabs(["📺 Monitor", "📅 Horarios", "📸 Fotos", "📊 Auditoría"])
