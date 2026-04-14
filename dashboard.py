@@ -12,7 +12,6 @@ st.markdown("""
     header { visibility: hidden; } 
     .stApp { background-color: #FDF8F3; }
     
-    /* Fuente maximizada para los datos de la tabla */
     [data-testid="stDataFrame"] td, [data-testid="stTable"] td {
         font-size: 24px !important; 
         font-weight: 600 !important;
@@ -54,10 +53,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["📺 Monitor", "📅 Asignar Horarios", "📸
 # --- TAB 1: MONITOR ---
 with tab1:
     col_t, col_cal, col_m1, col_m2, col_m3 = st.columns([1.2, 1, 1, 1, 1])
-    
-    with col_t:
-        st.subheader("🍞 CONTROL DE ASISTENCIA")
-
+    with col_t: st.subheader("🍞 CONTROL DE ASISTENCIA")
     with col_cal:
         hoy_col = (datetime.utcnow() - timedelta(hours=5)).date()
         fecha_consulta = st.date_input("Seleccionar Fecha", hoy_col)
@@ -78,30 +74,23 @@ with tab1:
             if not df_hoy.empty:
                 url_base = "https://scynlrjnuywjcwovnzxh.supabase.co/storage/v1/object/public/empleados/"
                 df_hoy['foto_v'] = df_hoy['biometric_id'].apply(lambda x: f"{url_base}{str(x).zfill(8)}.jpg")
-
                 st.dataframe(
                     df_hoy[['foto_v', 'persona', 'entrada_real', 'salida_real', 'tiempo_total', 'tardanza']],
                     column_config={
                         "foto_v": st.column_config.ImageColumn("", width="small"),
-                        "persona": "Empleado",
-                        "entrada_real": "Hora Entrada",
-                        "salida_real": "Hora Salida",
-                        "tiempo_total": "⏱️ Jornada",
-                        "tardanza": "¿Llegó Tarde?"
+                        "persona": "Empleado", "entrada_real": "Hora Entrada", "salida_real": "Hora Salida",
+                        "tiempo_total": "⏱️ Jornada", "tardanza": "¿Llegó Tarde?"
                     },
                     use_container_width=True, hide_index=True
                 )
-            else:
-                st.warning(f"No hay horarios programados para el día {fecha_consulta.strftime('%d/%m/%Y')}")
-    except Exception as e:
-        st.error(f"Error en Monitor: {e}")
+            else: st.warning(f"No hay registros para el día {fecha_consulta.strftime('%d/%m/%Y')}")
+    except Exception as e: st.error(f"Error en Monitor: {e}")
 
-# --- TAB 2: GESTIÓN DE HORARIOS (CON PERSISTENCIA Y RESOLUCIÓN DE CONFLICTOS) ---
+# --- TAB 2: GESTIÓN DE HORARIOS ---
 with tab2:
     st.header("📅 Planificador de Turnos Semanales")
     lunes_actual = hoy_col - timedelta(days=hoy_col.weekday())
     fecha_semana = st.date_input("Semana iniciando el lunes:", lunes_actual, key="fecha_selector")
-    
     res_e = conn.table("employees").select("biometric_id, full_name").execute()
     df_emp = pd.DataFrame(res_e.data)
     
@@ -112,22 +101,15 @@ with tab2:
         
         session_key = f"df_horarios_{fecha_semana}"
         if session_key not in st.session_state:
-            res_h = conn.table("employee_schedules_daily")\
-                .select("biometric_id, fecha, entrada_programada, salida_programada")\
-                .gte("fecha", dias_sem[0].isoformat())\
-                .lte("fecha", dias_sem[6].isoformat()).execute()
+            res_h = conn.table("employee_schedules_daily").select("*").gte("fecha", dias_sem[0]).lte("fecha", dias_sem[6]).execute()
             df_existente = pd.DataFrame(res_h.data)
-
             grid_data = []
             for _, e in df_emp.iterrows():
                 fila = {"ID": e['biometric_id'], "Empleado": e['full_name']}
                 for i, col_name in enumerate(cols_nombres):
                     fecha_str = dias_sem[i].isoformat()
                     match = df_existente[(df_existente['biometric_id'] == e['biometric_id']) & (df_existente['fecha'] == fecha_str)]
-                    if not match.empty:
-                        fila[col_name] = f"{str(match.iloc[0]['entrada_programada'])[:5]} - {str(match.iloc[0]['salida_programada'])[:5]}"
-                    else:
-                        fila[col_name] = "06:00 - 14:00"
+                    fila[col_name] = f"{str(match.iloc[0]['entrada_programada'])[:5]} - {str(match.iloc[0]['salida_programada'])[:5]}" if not match.empty else "06:00 - 14:00"
                 grid_data.append(fila)
             st.session_state[session_key] = pd.DataFrame(grid_data)
 
@@ -143,26 +125,17 @@ with tab2:
                         try:
                             ent_p, sal_p = val.split("-")
                             batch.append({
-                                "biometric_id": str(r["ID"]),
-                                "fecha": dias_sem[i].isoformat(),
-                                "entrada_programada": f"{ent_p.strip()}:00",
-                                "salida_programada": f"{sal_p.strip()}:00"
+                                "biometric_id": str(r["ID"]), "fecha": dias_sem[i].isoformat(),
+                                "entrada_programada": f"{ent_p.strip()}:00", "salida_programada": f"{sal_p.strip()}:00"
                             })
                         except: pass
-            
             if batch:
                 try:
-                    # Aplicamos on_conflict para evitar errores de llaves duplicadas
-                    conn.table("employee_schedules_daily").upsert(
-                        batch, 
-                        on_conflict="biometric_id, fecha"
-                    ).execute()
-                    
+                    conn.table("employee_schedules_daily").upsert(batch, on_conflict="biometric_id, fecha").execute()
                     st.session_state[session_key] = df_editor
-                    st.success("✅ ¡Horarios sincronizados y actualizados!")
+                    st.success("✅ Horarios sincronizados.")
                     st.balloons()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                except Exception as e: st.error(f"Error al guardar: {e}")
 
 # --- TAB 3: CAPTURAR FOTOS ---
 with tab3:
@@ -174,35 +147,50 @@ with tab3:
         cam = st.camera_input("Tomar Foto")
         if cam:
             b_id = sel.split(" - ")[0].zfill(8)
-            try:
-                conn.client.storage.from_("empleados").upload(
-                    path=f"{b_id}.jpg", 
-                    file=cam.getvalue(), 
-                    file_options={"content-type":"image/jpeg","upsert":"true"}
-                )
-                st.success(f"Foto guardada para {sel}")
-            except Exception as e:
-                st.error(f"Error al subir foto: {e}")
+            conn.client.storage.from_("empleados").upload(path=f"{b_id}.jpg", file=cam.getvalue(), file_options={"content-type":"image/jpeg","upsert":"true"})
+            st.success(f"Foto guardada para {sel}")
 
-# --- TAB 4: AUDITORÍA ---
+# --- TAB 4: AUDITORÍA (AJUSTADA) ---
 with tab4:
-    st.header("📊 Reportes y Auditoría")
+    st.header("📊 Reportes y Auditoría de Administración")
     c1, c2 = st.columns(2)
-    with c1: f_i = st.date_input("Desde", hoy_col - timedelta(days=15))
-    with c2: f_f = st.date_input("Hasta", hoy_col)
+    with c1: f_i = st.date_input("Fecha de Inicio", hoy_col - timedelta(days=7))
+    with c2: f_f = st.date_input("Fecha de Fin", hoy_col)
     
-    if st.button("🔍 Generar Reporte Detallado"):
+    if st.button("🔍 Cargar Reporte de Asistencia"):
         try:
             res_r = conn.table("daily_attendance_summary").select("*").gte("fecha_dia", f_i).lte("fecha_dia", f_f).execute()
             df_r = pd.DataFrame(res_r.data)
+            
             if not df_r.empty:
-                st.subheader("Resumen de Tardanzas por Persona")
-                resumen = df_r.groupby("persona").agg({"tardanza": lambda x: (x == "SÍ").sum()}).rename(columns={"tardanza": "Total Tardanzas"})
-                st.dataframe(resumen, use_container_width=True)
+                # 1. Detalle de Marcaciones (Prioridad Administrativa)
+                st.subheader("📋 Detalle de Marcaciones Diarias")
+                st.dataframe(
+                    df_r[['fecha_dia', 'persona', 'entrada_real', 'salida_real', 'tiempo_total']], 
+                    column_config={
+                        "fecha_dia": "Fecha",
+                        "persona": "Empleado",
+                        "entrada_real": "Entrada",
+                        "salida_real": "Salida",
+                        "tiempo_total": "⏱️ Tiempo Trabajado"
+                    },
+                    use_container_width=True, 
+                    hide_index=True
+                )
                 
-                st.subheader("Detalle de Marcaciones")
-                st.dataframe(df_r[['fecha_dia', 'persona', 'entrada_real', 'salida_real', 'tardanza']], use_container_width=True, hide_index=True)
+                st.divider()
+
+                # 2. Resumen de Tardanzas (Sección de apoyo al final)
+                st.subheader("🚩 Resumen de Tardanzas en el Periodo")
+                resumen = df_r.groupby("persona").agg({"tardanza": lambda x: (x == "SÍ").sum()}).reset_index()
+                resumen.columns = ["Empleado", "Total Tardanzas"]
+                
+                st.dataframe(
+                    resumen, 
+                    use_container_width=True, 
+                    hide_index=True
+                )
             else:
-                st.info("No se encontraron registros en este periodo.")
+                st.info("No se encontraron registros en el rango seleccionado.")
         except Exception as e:
             st.error(f"Error al generar reporte: {e}")
